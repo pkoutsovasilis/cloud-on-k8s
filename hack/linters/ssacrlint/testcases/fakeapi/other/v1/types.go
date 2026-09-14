@@ -26,3 +26,9 @@ func (o *OtherType) DeepCopyObject() runtime.Object {
 	copy.ObjectMeta = *o.ObjectMeta.DeepCopy()
 	return &copy
 }
+
+// OtherApplyConfig lives outside pkg/apis/ and must not be flagged by
+// ssacrlint when passed to client.Writer.Apply.
+type OtherApplyConfig struct{}
+
+func (*OtherApplyConfig) IsApplyConfiguration() {}

@@ -36,3 +36,10 @@ type FakeCRAlias = FakeCR
 // tests to verify that the analyzer handles an alias-to-pointer chain
 // (types.Alias → *types.Pointer → *types.Named) correctly.
 type FakeCRPtrAlias = *FakeCR
+
+// FakeApplyConfig is a stand-in for an ECK CR apply configuration type.
+// It implements runtime.ApplyConfiguration (a marker interface) so it can be
+// passed to client.Writer.Apply in test cases.
+type FakeApplyConfig struct{}
+
+func (*FakeApplyConfig) IsApplyConfiguration() {}

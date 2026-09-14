@@ -149,15 +149,9 @@ func (c *config) run(pass *analysis.Pass) (any, error) {
 	}
 	clientObjType := clientObjLookup.Type()
 
-	// Derive the object-argument index for each monitored method from
-	// client.Writer's interface definition: the parameter whose type is client.Object.
-	objIdxByMethod := make(map[string]int, 2)
-	for _, methodName := range []string{"Update", "Patch"} {
-		idx := methodObjParamIdx(clientWriterIface, methodName, clientObjType)
-		if idx < 0 {
-			return nil, errors.New("client.Writer." + methodName + " with a client.Object parameter not found - controller-runtime changed its interface")
-		}
-		objIdxByMethod[methodName] = idx
+	objIdxByMethod, err := writerObjArgIndices(clientWriterIface, clientObjType, pass.Pkg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build an SSA-based map from call-site position to argument CR state.
@@ -432,6 +426,34 @@ func implementsWriter(t types.Type, iface *types.Interface) bool {
 		return types.Implements(types.NewPointer(t), iface)
 	}
 	return false
+}
+
+// writerObjArgIndices returns a map from monitored client.Writer method name to
+// the index of its "object" argument in the call argument list. For Update and
+// Patch the object is typed client.Object; for Apply it is runtime.ApplyConfiguration,
+// which requires a separate import-graph lookup. Apply is omitted from the map
+// when runtime.ApplyConfiguration is not reachable from the analyzed package.
+func writerObjArgIndices(writerIface *types.Interface, clientObjType types.Type, pkg *types.Package) (map[string]int, error) {
+	m := make(map[string]int, 3)
+	for _, name := range []string{"Update", "Patch"} {
+		idx := methodObjParamIdx(writerIface, name, clientObjType)
+		if idx < 0 {
+			return nil, errors.New("client.Writer." + name + " with a client.Object parameter not found - controller-runtime changed its interface")
+		}
+		m[name] = idx
+	}
+	applyConfigType, err := lookupType(pkg, "k8s.io/apimachinery/pkg/runtime", "ApplyConfiguration")
+	if err != nil {
+		return nil, err
+	}
+	if applyConfigType != nil {
+		idx := methodObjParamIdx(writerIface, "Apply", applyConfigType)
+		if idx < 0 {
+			return nil, errors.New("client.Writer.Apply with a runtime.ApplyConfiguration parameter not found - controller-runtime changed its interface")
+		}
+		m["Apply"] = idx
+	}
+	return m, nil
 }
 
 // lookupType traverses the import graph rooted at pkg to find the named type

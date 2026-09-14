@@ -18,6 +18,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	otherv1 "github.com/elastic/cloud-on-k8s/hack/linters/ssacrlint/testcases/fakeapi/other/v1"
@@ -171,6 +173,21 @@ func NotFlaggedSubResourcePatch(c client.Client, ctx context.Context) {
 	c.Status().Patch(ctx, cr, client.MergeFrom(&fakev1.FakeCR{}))
 }
 
+// FlaggedRawJSONPatch calls Patch with client.RawPatch(types.JSONPatchType) on
+// a concrete ECK CR. All Patch calls on ECK CRs are flagged regardless of patch
+// type — must produce a diagnostic.
+func FlaggedRawJSONPatch(c client.Client, ctx context.Context) {
+	cr := &fakev1.FakeCR{}
+	c.Patch(ctx, cr, client.RawPatch(k8stypes.JSONPatchType, []byte(`[{"op":"replace","path":"/spec/foo","value":1}]`))) // want "on an ECK CR"
+}
+
+// FlaggedRawMergePatch calls Patch with client.RawPatch(types.MergePatchType)
+// on a concrete ECK CR — must produce a diagnostic.
+func FlaggedRawMergePatch(c client.Client, ctx context.Context) {
+	cr := &fakev1.FakeCR{}
+	c.Patch(ctx, cr, client.RawPatch(k8stypes.MergePatchType, []byte(`{"spec":{"foo":1}}`))) // want "on an ECK CR"
+}
+
 // FlaggedPatchInterfaceVarCR declares obj as client.Object but assigns a
 // concrete ECK CR, then passes obj to Patch — must produce a diagnostic
 // with the concrete-CR message.
@@ -283,8 +300,35 @@ func FlaggedUnknownVsNonCRBranchUpdate(c client.Client, ctx context.Context, obj
 }
 
 // NotFlaggedCreate calls Create on a fake ECK CR. Create is not in the
-// monitored method list (Update and Patch only) and must not be flagged.
+// monitored method list (Update, Patch, Apply only) and must not be flagged.
 func NotFlaggedCreate(c client.Client, ctx context.Context) {
 	cr := &fakev1.FakeCR{}
 	c.Create(ctx, cr)
+}
+
+// FlaggedApply calls Apply on a fake ECK apply configuration — must produce a diagnostic.
+func FlaggedApply(c client.Client, ctx context.Context) {
+	cfg := &fakev1.FakeApplyConfig{}
+	c.Apply(ctx, cfg) // want "on an ECK CR"
+}
+
+// NotFlaggedApplyNonCR calls Apply on an apply configuration whose package is
+// outside pkg/apis/ — must not be flagged.
+func NotFlaggedApplyNonCR(c client.Client, ctx context.Context) {
+	cfg := &otherv1.OtherApplyConfig{}
+	c.Apply(ctx, cfg)
+}
+
+// NotFlaggedSubResourceApply calls Status().Apply() — SubResourceWriter does
+// not implement client.Writer, so this must not be flagged.
+func NotFlaggedSubResourceApply(c client.Client, ctx context.Context) {
+	cfg := &fakev1.FakeApplyConfig{}
+	c.Status().Apply(ctx, cfg)
+}
+
+// FlaggedApplyFuncParam receives cfg as a runtime.ApplyConfiguration parameter
+// and passes it directly to Apply. The analyzer cannot resolve the concrete type
+// and treats uncertainty as a potential violation — must produce a diagnostic.
+func FlaggedApplyFuncParam(c client.Client, ctx context.Context, cfg runtime.ApplyConfiguration) {
+	c.Apply(ctx, cfg) // want "cannot resolve its concrete type"
 }
